@@ -1,4 +1,3 @@
-# openaq-air-quality-pipeline
 # 🌍 OpenAQ Air Quality Pipeline using Spark, Scala, and AWS
 
 This project demonstrates a **batch-style air quality alert pipeline** using real-world data from [OpenAQ](https://openaq.org/), built with:
@@ -30,3 +29,45 @@ openaq-air-quality-pipeline/
 ├── infra/                # CloudFormation templates and IAM policies
 ├── docs/                 # Architecture diagrams, screenshots
 └── README.md             # This file
+```
+
+---
+
+## 🛠️ Tech Stack
+
+- Apache Spark 3.x
+- Scala 2.12
+- SBT
+- AWS S3, SNS, QuickSight (All Free Tier compatible)
+- OpenAQ Public API (v3)
+
+---
+
+## 📊 Alert Criteria (Sample)
+
+| Parameter | Alert Condition        | Description                  |
+|-----------|------------------------|------------------------------|
+| PM2.5     | > 150 µg/m³            | Hazardous air quality        |
+| PM10      | > 200 µg/m³            | Unsafe dust levels           |
+| NO2       | > 100 µg/m³            | Nitrogen dioxide alert       |
+
+---
+
+## ✅ Status
+
+- [x] Repository created & structured  
+- [ ] Spark project setup  
+- [ ] Data fetch & transformation  
+- [ ] S3 output integration  
+- [ ] SNS email alerts  
+- [ ] QuickSight dashboard
+
+---
+
+## 📌 Author
+
+👨‍💻 *This project is built by Rahul Gunjal as a portfolio showcase for data engineering and cloud skills.*
+
+---
+
+> ⭐ Don’t forget to ⭐ this repo if you find the idea useful!
