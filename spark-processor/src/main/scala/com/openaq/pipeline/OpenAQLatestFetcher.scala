@@ -22,10 +22,11 @@ object OpenAQLatestFetcher {
       this.getClass.getClassLoader.getResourceAsStream("location_sensor_selected.json")
     ).getOrElse(throw new RuntimeException("location_sensor_mapping.json not found in resources"))
 
-    val jsonString = Source.fromInputStream(resourceStream).mkString
+    val jsonString = Source.fromInputStream(resourceStream,"UTF-8").mkString
     resourceStream.close()
 
     val rawJsonDF = spark.read.json(Seq(jsonString).toDS)
+    rawJsonDF.show(25,false)
 
     val sensorsExploded = explodeSensorData(rawJsonDF, spark)
 
@@ -67,6 +68,7 @@ object OpenAQLatestFetcher {
     df.withColumn("sensor", explode($"sensors"))
       .select(
         $"location_id",
+        $"City",
         $"location_name",
         $"sensor.sensor_id",
         $"sensor.sensor_name"
@@ -77,6 +79,7 @@ object OpenAQLatestFetcher {
     import spark.implicits._
     val locId = row.getAs[Long]("location_id")
     val locName = row.getAs[String]("location_name")
+    val cityName = row.getAs[String]("City")
     val sensorId = row.getAs[Long]("sensor_id")
     val sensorName = row.getAs[String]("sensor_name")
 
@@ -99,6 +102,7 @@ object OpenAQLatestFetcher {
       result += Row(
         locId,
         locName,
+        cityName,
         sensorId,
         sensorName,
         r.getAs[String]("utc"),
@@ -125,6 +129,7 @@ object OpenAQLatestFetcher {
     StructType(Seq(
       StructField("location_id", LongType, true),
       StructField("location_name", StringType, true),
+      StructField("City", StringType, true),
       StructField("sensor_id", LongType, true),
       StructField("sensor_name", StringType, true),
       StructField("datetime_utc", StringType, true),
