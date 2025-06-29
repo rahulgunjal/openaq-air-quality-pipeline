@@ -2,74 +2,78 @@
 
 set -e
 
-# ------------------------
-# LOAD ENVIRONMENT VARIABLES FROM .env
-# ------------------------
+# Load API key from .env
 if [ -f .env ]; then
-  echo "🔐 Loading environment variables from .env"
-  export $(grep -v '^#' .env | xargs)
+  export $(grep OPENAQ_API_KEY .env | xargs)
 else
-  echo "⚠️  .env file not found! Exiting."
+  echo ".env file not found! Please create one with OPENAQ_API_KEY."
   exit 1
 fi
 
-# ------------------------
-# CONFIGURATION
-# ------------------------
-REGION="ap-south-1"
-BUCKET="openaq-rahul-bucket-20250629"
-STACK_NAME="openaq-airquality-stack"
-OUTPUT_PREFIX="output/openaq_latest_data"
-JAR_PATH="target/spark-processor-1.0-SNAPSHOT.jar"
-CLASS_NAME="com.openaq.pipeline.OpenAQLatestFetcher"
-MAPPING_JSON="src/main/resources/location_sensor_selected.json"
-TEMPLATE_PATH="cloudformation/airquality-stack.yaml"
-OUTPUT_DIR="output/openaq_latest_data"
+# Define variables
+STACK_NAME=openaq-airquality-stack
+BUCKET_NAME=openaq-rahul-bucket
+REGION=ap-south-1
+OUTPUT_PREFIX=output/openaq_latest_data
+TIMESTAMP=$(date +%Y%m%d%H%M%S)
 
-# ------------------------
-# BUILD SPARK JAR LOCALLY
-# ------------------------
-echo "📦 Building Spark JAR..."
-mvn clean package
+##################################
+# 1. Build Spark JAR
+##################################
+echo "Building Spark JAR..."
+mvn -f pom.xml clean package
 
-# ------------------------
-# COPY FILES TO S3 (Jar + Mapping)
-# ------------------------
-echo "☁️ Uploading JAR and mapping JSON to S3..."
-aws s3 mb s3://$BUCKET --region $REGION || echo "Bucket already exists"
-aws s3 cp $JAR_PATH s3://$BUCKET/target/$(basename $JAR_PATH) --region $REGION
-aws s3 cp $MAPPING_JSON s3://$BUCKET/$MAPPING_JSON --region $REGION
+##################################
+# 2. Run Spark Job Locally
+##################################
+echo "🧪 Running Spark job locally..."
 
-# ------------------------
-# DEPLOY CLOUDFORMATION STACK
-# ------------------------
+# Load .env if available (optional)
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+fi
 
+# Run the spark-submit command using OPENAQ_API_KEY if available
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+  echo "Detected Windows - running spark-submit using PowerShell..."
+  powershell -Command " \
+    \$env:OPENAQ_API_KEY='$OPENAQ_API_KEY'; \
+    spark-submit --class com.openaq.pipeline.OpenAQLatestFetcher target/spark-processor-1.0-SNAPSHOT.jar \
+  "
+else
+  echo "Running on Unix/Linux..."
+  spark-submit \
+    --conf "spark.driver.extraJavaOptions=-DOPENAQ_API_KEY=$OPENAQ_API_KEY" \
+    --class com.openaq.pipeline.OpenAQLatestFetcher \
+    target/spark-processor-1.0-SNAPSHOT.jar
+fi
+
+
+##################################
+# 3. Upload Artifacts to S3
+##################################
+echo "Uploading files to S3 bucket: $BUCKET_NAME..."
+
+#aws s3 cp target/spark-processor-1.0-SNAPSHOT.jar s3://$BUCKET_NAME/target/spark-processor-1.0-SNAPSHOT.jar
+#aws s3 cp src/main/resources/location_sensor_selected.json s3://$BUCKET_NAME/src/main/resources/location_sensor_selected.json
+
+# Upload output CSVs with timestamp to avoid overwrite
+for file in output/openaq_latest_data/*.csv; do
+  aws s3 cp "$file" "s3://$BUCKET_NAME/$OUTPUT_PREFIX/$TIMESTAMP/"
+done
+
+##################################
+# 4. Deploy CloudFormation Stack
+##################################
 #echo "🚀 Deploying CloudFormation stack: $STACK_NAME..."
 #aws cloudformation deploy \
-#  --template-file $TEMPLATE_PATH \
+#  --template-file spark-processor/cloudformation/airquality-stack.yaml \
 #  --stack-name $STACK_NAME \
 #  --capabilities CAPABILITY_NAMED_IAM \
 #  --region $REGION
 
-# ------------------------
-# RUN SPARK JOB LOCALLY
-# ------------------------
-echo "🧪 Running Spark job locally..."
-spark-submit \
-  --class $CLASS_NAME \
-  --master "local[*]" \
-  --conf "spark.driver.extraJavaOptions=-DOPENAQ_API_KEY=$OPENAQ_API_KEY" \
-  $JAR_PATH
-
-# ------------------------
-# COPY SPARK OUTPUT TO S3 WITH TIMESTAMP
-# ------------------------
-echo "📂 Uploading local output to S3 (preserving previous files)..."
-TS=$(date +%Y%m%d_%H%M%S)
-
-for f in $OUTPUT_DIR/*; do
-  fname=$(basename "$f")
-  aws s3 cp "$f" "s3://$BUCKET/$OUTPUT_PREFIX/$TS-$fname" --region $REGION
-done
-
-echo "✅ Deployment, local run, and upload complete. You can now connect QuickSight or Athena to s3://$BUCKET/$OUTPUT_PREFIX"
+##################################
+# 5. Print Completion
+##################################
+echo "✅ Deployment Complete. Data uploaded to s3://$BUCKET_NAME/$OUTPUT_PREFIX/$TIMESTAMP/"
+echo "   View in AWS QuickSight or trigger Lambda to process via EMR."
