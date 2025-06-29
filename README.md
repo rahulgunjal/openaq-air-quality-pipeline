@@ -47,6 +47,28 @@ openaq-air-quality-pipeline/
 
 ---
 
+## 🤖 AI-Assisted Development
+
+This project significantly leveraged the power of **AI-driven software engineering assistants**:
+
+### 🧠 OpenAI ChatGPT (GPT-4)
+Used for:
+- Infrastructure-as-Code templating via CloudFormation
+- Translating high-level architecture into deployable artifacts
+- Generating deploy and cleanup shell scripts with idempotent logic
+- Composing and refining project documentation, including this README.md, with consistent formatting and developer-focused clarity.
+
+### 💡 GitHub Copilot
+Used in:
+- Accelerating Spark + Scala boilerplate code generation
+- Suggesting functional transformations on nested JSON fetched via HTTP
+- Assisting with Maven POM setup and dependency resolution
+- Code completion and LSP-aware inline documentation
+
+> Together, these AI tools enabled **high-throughput development**, **reduced cognitive overhead**, and **accelerated DevOps automation**, exemplifying the synergy between human creativity and LLM-augmented engineering workflows.
+
+---
+
 ## 🚀 How to Run This Project
 
 ### 1. 🔧 Prerequisites
