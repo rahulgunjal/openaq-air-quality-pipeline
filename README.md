@@ -2,21 +2,21 @@
 
 This project demonstrates a **batch-style air quality alert pipeline** using real-world data from [OpenAQ](https://openaq.org/), built with:
 - **Apache Spark** (Scala)
+- **Amazon EMR Serverless** to run Spark jobs
 - **Amazon S3** for cloud storage
-- **Amazon SNS** for email alerts
+- **Amazon Lambda** to trigger the pipeline
 - **Amazon QuickSight** for dashboarding
 
-> 🚀 Designed to simulate a real-time monitoring use case using batch data pulled from a public API.
+> 🚀 Designed to simulate a real-time monitoring use case using batch data pulled from a public API and fully automated on AWS.
 
 ---
 
 ## 🧠 What It Does
 
 ✅ Fetches recent air quality data from the OpenAQ API (v3)  
-✅ Filters by Indian cities (Pune, Mumbai, Delhi, Bengaluru, Aurangabad)  
-✅ Detects critical pollution levels (e.g., PM2.5 > 150)  
-✅ Sends email alerts if unsafe readings are found (via AWS SNS)  
-✅ Stores full + alert data to AWS S3  
+✅ Filters by selected Indian cities (Pune, Mumbai, Delhi, Bengaluru, Aurangabad)  
+✅ Stores results in versioned folders in S3 for analytics  
+✅ Automates deployment via CloudFormation  
 ✅ Visualizes results in Amazon QuickSight dashboards
 
 ---
@@ -25,10 +25,14 @@ This project demonstrates a **batch-style air quality alert pipeline** using rea
 
 ```bash
 openaq-air-quality-pipeline/
-├── spark-processor/      # Spark + Scala project to process API data
-├── infra/                # CloudFormation templates and IAM policies
-├── docs/                 # Architecture diagrams, screenshots
-└── README.md             # This file
+├── spark-processor/        # Spark + Scala project to process API data
+│   ├── src/main/scala/     # Scala code
+│   ├── src/main/resources/ # Input mapping JSON
+│   └── target/             # Output JAR & results
+├── scripts/                # deploy.sh and cleanup.sh automation scripts
+├── cloudformation/         # CloudFormation template for full AWS infra
+├── .env                    # API Key (not tracked in Git)
+└── README.md               # This file
 ```
 
 ---
@@ -37,30 +41,98 @@ openaq-air-quality-pipeline/
 
 - Apache Spark 3.x
 - Scala 2.12
-- SBT
-- AWS S3, SNS, QuickSight (All Free Tier compatible)
+- Maven
+- AWS CloudFormation, S3, Lambda, EMR Serverless, QuickSight
 - OpenAQ Public API (v3)
 
 ---
 
-## 📊 Alert Criteria (Sample)
+## 🚀 How to Run This Project
 
-| Parameter | Alert Condition        | Description                  |
-|-----------|------------------------|------------------------------|
-| PM2.5     | > 150 µg/m³            | Hazardous air quality        |
-| PM10      | > 200 µg/m³            | Unsafe dust levels           |
-| NO2       | > 100 µg/m³            | Nitrogen dioxide alert       |
+### 1. 🔧 Prerequisites
+- AWS CLI installed & configured
+- Git Bash or PowerShell
+- Java 8 and Spark 3.x installed locally
+- Maven (`mvn`) available on PATH
+- IAM permissions to create resources via CloudFormation
+- QuickSight set up in your AWS region (Mumbai: `ap-south-1`)
+
+---
+
+### 2. 🧪 Local Development & Test
+
+```bash
+# Clone the repo
+$ git clone https://github.com/yourusername/openaq-air-quality-pipeline.git
+$ cd openaq-air-quality-pipeline
+
+# Add your OpenAQ API key in `.env` (not committed to git)
+$ echo "OPENAQ_API_KEY=your_api_key_here" > .env
+
+# Build the Spark JAR
+$ cd spark-processor
+$ mvn clean package
+
+# Run locally via Spark Submit
+$ spark-submit --class com.openaq.pipeline.OpenAQLatestFetcher target/spark-processor-1.0-SNAPSHOT.jar
+```
+
+---
+
+### 3. ☁️ Deploy to AWS (Automated with `deploy.sh`)
+
+```bash
+# Back to project root
+$ bash scripts/deploy.sh
+```
+
+This script performs the following steps **automatically**:
+- Loads your API key from `.env`
+- Builds the JAR
+- Runs the Spark job locally
+- Uploads generated output to S3 (avoids overwriting previous runs)
+- Deploys AWS infrastructure using CloudFormation
+- Triggers the Spark job via Lambda
+- Prepares data for QuickSight dashboarding
+
+> 🔐 Important: `.env` file is used to securely inject your API key. Keep it out of version control!
+
+---
+
+### 4. 📊 View Dashboard in QuickSight
+
+- Open [Amazon QuickSight](https://quicksight.aws.amazon.com/)
+- Create a new dataset using S3 as source (point to the output folder in S3)
+- Create a dashboard to compare air quality levels across different cities and sensors
+- Use timestamp or sensorId to filter and trend the data over time
+
+---
+
+### 5. 🧹 Clean Up AWS Resources with `cleanup.sh`
+
+To delete all AWS resources and **avoid unwanted AWS charges**:
+
+```bash
+$ bash scripts/cleanup.sh
+```
+
+This script will:
+- Delete the CloudFormation stack
+- Optionally remove S3 output and logs
+- Clean up Lambda, EMR Serverless, IAM roles, etc.
 
 ---
 
 ## ✅ Status
 
 - [x] Repository created & structured  
-- [ ] Spark project setup  
-- [ ] Data fetch & transformation  
-- [ ] S3 output integration  
-- [ ] SNS email alerts  
-- [ ] QuickSight dashboard
+- [x] Spark project setup  
+- [x] Data fetch & transformation  
+- [x] S3 output integration  
+- [x] AWS deployment with CloudFormation  
+- [x] Lambda trigger integration  
+- [x] QuickSight dashboard setup  
+- [x] Cleanup automation
 
 ---
 
@@ -70,4 +142,4 @@ openaq-air-quality-pipeline/
 
 ---
 
-> ⭐ Don’t forget to ⭐ this repo if you find the idea useful!
+> ⭐ Don’t forget to star this repo if you find it helpful or inspiring!
