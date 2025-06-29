@@ -6,6 +6,7 @@ import scala.io.Source
 import java.net.{HttpURLConnection, URL}
 import scala.collection.mutable.ListBuffer
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.AnalysisException
 
 object OpenAQLatestFetcher {
 
@@ -18,7 +19,7 @@ object OpenAQLatestFetcher {
     import spark.implicits._
 
     val resourceStream = Option(
-      this.getClass.getClassLoader.getResourceAsStream("location_sensor_mapping.json")
+      this.getClass.getClassLoader.getResourceAsStream("location_sensor_selected.json")
     ).getOrElse(throw new RuntimeException("location_sensor_mapping.json not found in resources"))
 
     val jsonString = Source.fromInputStream(resourceStream).mkString
@@ -29,16 +30,23 @@ object OpenAQLatestFetcher {
     val sensorsExploded = explodeSensorData(rawJsonDF, spark)
 
 
-
     val apiKey = sys.env.getOrElse("OPENAQ_API_KEY", "")
     if (apiKey.isEmpty) throw new RuntimeException("OPENAQ_API_KEY env not set")
-
     val resultsBuffer = new ListBuffer[Row]()
-
     val rowsArray = sensorsExploded.collect()
+
     for (i <- rowsArray.indices) {
       val row = rowsArray(i)
-      resultsBuffer ++= processLocation(row, spark, apiKey)
+      try {
+        resultsBuffer ++= processLocation(row, spark, apiKey)
+      } catch {
+        case e: AnalysisException =>
+          println(s"AnalysisException caught for row $i: ${e.getMessage}")
+        // You can log row-specific information or skip
+        case e: Exception =>
+          println(s"Other exception caught for row $i: ${e.getMessage}")
+        // You can log row-specific information or skip
+      }
     }
 
     val finalSchema = getFinalSchema()
@@ -62,7 +70,7 @@ object OpenAQLatestFetcher {
         $"location_name",
         $"sensor.sensor_id",
         $"sensor.sensor_name"
-      ).where("location_id in (3409461)")
+      )
   }
 
   def processLocation(row: Row, spark: SparkSession, apiKey: String): Seq[Row] = {
@@ -78,12 +86,7 @@ object OpenAQLatestFetcher {
     val rdd = spark.sparkContext.parallelize(Seq(json))
     val df = spark.read.json(rdd)
 
-    df.printSchema()
-
     val exploded = df.selectExpr("explode(results) as result")
-
-    exploded.printSchema()
-    exploded.show(10,false)
 
     val selected = exploded.select("result.datetime.utc", "result.datetime.local", "result.value", "result.sensorsId", "result.locationsId")
 
@@ -112,7 +115,7 @@ object OpenAQLatestFetcher {
     conn.setRequestProperty("X-API-Key", apiKey)
 
     val inputStream = conn.getInputStream
-    val content = Source.fromInputStream(inputStream).mkString
+    val content = Source.fromInputStream(inputStream,"UTF-8").mkString
     inputStream.close()
     conn.disconnect()
     content
