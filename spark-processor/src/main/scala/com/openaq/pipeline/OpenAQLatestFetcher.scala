@@ -28,6 +28,8 @@ object OpenAQLatestFetcher {
 
     val sensorsExploded = explodeSensorData(rawJsonDF, spark)
 
+
+
     val apiKey = sys.env.getOrElse("OPENAQ_API_KEY", "")
     if (apiKey.isEmpty) throw new RuntimeException("OPENAQ_API_KEY env not set")
 
@@ -60,7 +62,7 @@ object OpenAQLatestFetcher {
         $"location_name",
         $"sensor.sensor_id",
         $"sensor.sensor_name"
-      )
+      ).where("location_id in (3409461)")
   }
 
   def processLocation(row: Row, spark: SparkSession, apiKey: String): Seq[Row] = {
@@ -76,10 +78,16 @@ object OpenAQLatestFetcher {
     val rdd = spark.sparkContext.parallelize(Seq(json))
     val df = spark.read.json(rdd)
 
-    val exploded = df.selectExpr("explode(results) as result")
-      .select("result.datetime.utc", "result.datetime.local", "result.value", "result.sensorsId", "result.locationsId")
+    df.printSchema()
 
-    val filtered = exploded.filter($"sensorsId" === sensorId)
+    val exploded = df.selectExpr("explode(results) as result")
+
+    exploded.printSchema()
+    exploded.show(10,false)
+
+    val selected = exploded.select("result.datetime.utc", "result.datetime.local", "result.value", "result.sensorsId", "result.locationsId")
+
+    val filtered = selected.filter($"sensorsId" === sensorId)
 
     val collected = filtered.collect()
     val result = new ListBuffer[Row]()
