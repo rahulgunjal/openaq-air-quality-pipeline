@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy Spark OpenAQ Job with EMR Serverless, Lambda Trigger, S3, Athena, Glue
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: openaq-data-bucket
+    Description: S3 bucket name for JAR, mapping JSON, and outputs
+  EMRAppName:
+    Type: String
+    Default: OpenAQEMRApp
+  OutputPrefix:
+    Type: String
+    Default: output/openaq_latest_data/
+
+Resources:
+
+  # S3 Bucket
+  OpenAQBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+
+  # IAM Role for EMR Serverless
+  EMRServerlessExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OpenAQEMRExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: emr-serverless.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  # EMR Serverless Application
+  OpenAQEMRApp:
+    Type: AWS::EMRServerless::Application
+    Properties:
+      Name: !Ref EMRAppName
+      ReleaseLabel: emr-6.10.0
+      Type: Spark
+      MaximumCapacity:
+        Cpu: 4 vCPU
+        Memory: 8 GB
+
+  # Lambda IAM Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OpenAQLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: OpenAQLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - emr-serverless:StartJobRun
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # Lambda Function to Trigger EMR Job
+  TriggerEMRJobLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TriggerOpenAQJob
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Handler: index.handler
+      Timeout: 120
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          def handler(event, context):
+              client = boto3.client('emr-serverless')
+              response = client.start_job_run(
+                  applicationId=os.environ['EMR_APP_ID'],
+                  executionRoleArn=os.environ['EMR_ROLE'],
+                  jobDriver={
+                      'sparkSubmit': {
+                          'entryPoint': f"s3://{os.environ['BUCKET']}/target/spark-processor-1.0-SNAPSHOT.jar",
+                          'entryPointArguments': [],
+                          'sparkSubmitParameters': '--class com.openaq.pipeline.OpenAQLatestFetcher'
+                      }
+                  },
+                  configurationOverrides={
+                      'monitoringConfiguration': {
+                          's3MonitoringConfiguration': {
+                              'logUri': f"s3://{os.environ['BUCKET']}/logs/"
+                          }
+                      }
+                  }
+              )
+              return response
+      Environment:
+        Variables:
+          EMR_APP_ID: !Ref OpenAQEMRApp
+          EMR_ROLE: !GetAtt EMRServerlessExecutionRole.Arn
+          BUCKET: !Ref BucketName
+
+Outputs:
+  LambdaFunction:
+    Value: !Ref TriggerEMRJobLambda
+    Description: Lambda function to trigger the EMR Spark job
+  EMRApplicationId:
+    Value: !Ref OpenAQEMRApp
+    Description: EMR Serverless Application ID
+  BucketName:
+    Value: !Ref BucketName
+    Description: S3 Bucket where files are stored
