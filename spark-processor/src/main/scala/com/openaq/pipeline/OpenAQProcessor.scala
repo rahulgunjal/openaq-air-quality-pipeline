@@ -1,60 +1,92 @@
 package com.openaq.pipeline
 
 import org.apache.spark.sql.{SparkSession, DataFrame}
-import java.net.{HttpURLConnection, URL}
+import org.apache.spark.sql.functions._
 import scala.io.Source
-import java.io.{BufferedReader, InputStreamReader}
+import java.net.HttpURLConnection
+import java.net.URL
+import scala.collection.mutable.ListBuffer
 
 object OpenAQProcessor {
 
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder()
-      .appName("OpenAQ Air Quality Fetcher")
+      .appName("OpenAQ Air Quality Processor")
       .master("local[*]")
       .getOrCreate()
 
-    val apiUrl =
-      "https://api.openaq.org/v3/latest?country=IN&city=Pune,Mumbai,Delhi,Bengaluru,Aurangabad&parameter=pm25,pm10,so2,no2,o3"
+    import spark.implicits._
 
-    try {
-      println("🔄 Fetching data from OpenAQ API...")
-
-      val conn = new URL(apiUrl).openConnection().asInstanceOf[HttpURLConnection]
-      conn.setRequestMethod("GET")
-
-      val inputStream = conn.getInputStream
-      val content = Source.fromInputStream(inputStream).mkString
-      inputStream.close()
-      conn.disconnect()
-
-      import spark.implicits._
-      import org.apache.spark.sql.functions._
-
-      val jsonRDD = spark.sparkContext.parallelize(Seq(content))
-      val df = spark.read.json(jsonRDD)
-
-      println("✅ Raw JSON parsed into DataFrame. Showing top-level structure:")
-      df.printSchema()
-
-      // Flattening the 'results' array
-      val resultsDF = df.select(explode($"results").alias("result"))
-      val flatDF = resultsDF.select(
-        $"result.city",
-        $"result.measurements.parameter",
-        $"result.measurements.value",
-        $"result.measurements.unit",
-        $"result.measurements.lastUpdated"
-      )
-
-      println("📊 Flattened result preview:")
-      flatDF.show(false)
-
-    } catch {
-      case e: Exception =>
-        println("❌ Error while fetching or processing API data:")
-        e.printStackTrace()
+    val baseUrl = "https://api.openaq.org/v3/locations?limit=1000&order_by=id&sort_order=asc&countries_id=9"
+    val apiKey = sys.env.getOrElse("OPENAQ_API_KEY", "")
+    if (apiKey.isEmpty) {
+      throw new RuntimeException("Environment variable OPENAQ_API_KEY is not set.")
     }
 
+    // Get total pages
+    val firstResponse = fetchJson(baseUrl, apiKey)
+    val firstRDD = spark.sparkContext.parallelize(Seq(firstResponse))
+    val firstDF = spark.read.json(firstRDD)
+    val meta = firstDF.selectExpr("meta.found as found", "meta.limit as limit").first()
+    val totalRecords = meta.getLong(0)
+    val limit = meta.getLong(1)
+    val totalPages = Math.ceil(totalRecords.toDouble / limit).toInt
+
+    println(s"Total records: $totalRecords, Pages to fetch: $totalPages")
+
+    val allJsonResponses = new ListBuffer[String]()
+    allJsonResponses += firstResponse
+
+    for (page <- 2 to totalPages) {
+      val pagedUrl = s"$baseUrl&page=$page"
+      allJsonResponses += fetchJson(pagedUrl, apiKey)
+      println(s"Fetched page $page of $totalPages")
+    }
+
+    val resultsDFs = allJsonResponses.map { json =>
+      val rdd = spark.sparkContext.parallelize(Seq(json))
+      val df = spark.read.json(rdd)
+      df.selectExpr("explode(results) as result")
+    }
+
+    val combinedResultsDF = resultsDFs.reduce(_ union _)
+    val resultDF = combinedResultsDF.select("result.*")
+
+    // Extract location id, name and sensor array
+    val sensorDF = resultDF.select(
+      $"id".alias("location_id"),
+      $"name".alias("location_name"),
+      $"sensors"
+    )
+
+    // Create a struct of (sensor_id, sensor_name)
+    val transformedDF = sensorDF.withColumn("sensors_info",
+      expr("transform(sensors, s -> struct(s.id as sensor_id, s.name as sensor_name))")
+    ).select(
+      $"location_id",
+      $"location_name",
+      $"sensors_info".alias("sensors")
+    )
+
+    transformedDF.coalesce(1)
+      .write
+      .option("header", "true")
+      .mode("overwrite")
+      .json("output/openaq_location_sensors") // use JSON since CSV can't hold arrays
+
+    println("Sensor data written to: output/openaq_location_sensors")
     spark.stop()
+  }
+
+  def fetchJson(apiUrl: String, apiKey: String): String = {
+    val conn = new URL(apiUrl).openConnection().asInstanceOf[HttpURLConnection]
+    conn.setRequestMethod("GET")
+    conn.setRequestProperty("X-API-Key", apiKey)
+
+    val inputStream = conn.getInputStream
+    val content = Source.fromInputStream(inputStream, "UTF-8").mkString
+    inputStream.close()
+    conn.disconnect()
+    content
   }
 }
