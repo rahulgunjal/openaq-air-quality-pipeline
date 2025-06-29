@@ -4,7 +4,7 @@ Description: Deploy Spark OpenAQ Job with EMR Serverless, Lambda Trigger, S3, At
 Parameters:
   BucketName:
     Type: String
-    Default: openaq-data-bucket
+    Default: openaq-rahul-bucket-20250629
     Description: S3 bucket name for JAR, mapping JSON, and outputs
   EMRAppName:
     Type: String
@@ -15,17 +15,10 @@ Parameters:
 
 Resources:
 
-  # S3 Bucket
-  OpenAQBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Ref BucketName
-
-  # IAM Role for EMR Serverless
   EMRServerlessExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: OpenAQEMRExecutionRole
+      RoleName: !Sub "${AWS::StackName}-EMRExecutionRole"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -37,7 +30,6 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
         - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
 
-  # EMR Serverless Application
   OpenAQEMRApp:
     Type: AWS::EMRServerless::Application
     Properties:
@@ -48,11 +40,10 @@ Resources:
         Cpu: 4 vCPU
         Memory: 8 GB
 
-  # Lambda IAM Role
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: OpenAQLambdaExecutionRole
+      RoleName: !Sub "${AWS::StackName}-LambdaExecutionRole"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -75,8 +66,11 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt EMRServerlessExecutionRole.Arn
 
-  # Lambda Function to Trigger EMR Job
   TriggerEMRJobLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -106,7 +100,16 @@ Resources:
                           's3MonitoringConfiguration': {
                               'logUri': f"s3://{os.environ['BUCKET']}/logs/"
                           }
-                      }
+                      },
+                      'applicationConfiguration': [
+                          {
+                              'classification': 'spark-defaults',
+                              'properties': {
+                                  'spark.driverEnv.OPENAQ_API_KEY': os.environ['OPENAQ_API_KEY'],
+                                  'spark.executorEnv.OPENAQ_API_KEY': os.environ['OPENAQ_API_KEY']
+                              }
+                          }
+                      ]
                   }
               )
               return response
@@ -115,6 +118,7 @@ Resources:
           EMR_APP_ID: !Ref OpenAQEMRApp
           EMR_ROLE: !GetAtt EMRServerlessExecutionRole.Arn
           BUCKET: !Ref BucketName
+          OPENAQ_API_KEY: bc67d2fd7c804a0d841265db9b2b2561e2e4cdee1a144a4b68684c665b3fc06b
 
 Outputs:
   LambdaFunction:

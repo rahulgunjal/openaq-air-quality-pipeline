@@ -4,11 +4,13 @@
 set -e
 
 # Variables
-BUCKET_NAME=openaq-data-bucket
+BUCKET_NAME=openaq-rahul-bucket-20250629
 STACK_NAME=openaq-airquality-stack
 REGION=ap-south-1
 JAR_PATH=target/spark-processor-1.0-SNAPSHOT.jar
 JSON_PATH=src/main/resources/location_sensor_selected.json
+OUTPUT_CSV_PATH=src/main/resources/location_sensor_selected.json
+
 
 # 1. Build Spark JAR
 printf "\n📦 Building Spark JAR...\n"
