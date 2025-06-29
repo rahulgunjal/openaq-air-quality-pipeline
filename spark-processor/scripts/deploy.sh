@@ -1,40 +1,75 @@
 #!/bin/bash
 
-# Exit immediately if any command fails
 set -e
 
-# Variables
-BUCKET_NAME=openaq-rahul-bucket-20250629
-STACK_NAME=openaq-airquality-stack
-REGION=ap-south-1
-JAR_PATH=target/spark-processor-1.0-SNAPSHOT.jar
-JSON_PATH=src/main/resources/location_sensor_selected.json
-OUTPUT_CSV_PATH=src/main/resources/location_sensor_selected.json
+# ------------------------
+# LOAD ENVIRONMENT VARIABLES FROM .env
+# ------------------------
+if [ -f .env ]; then
+  echo "🔐 Loading environment variables from .env"
+  export $(grep -v '^#' .env | xargs)
+else
+  echo "⚠️  .env file not found! Exiting."
+  exit 1
+fi
 
+# ------------------------
+# CONFIGURATION
+# ------------------------
+REGION="ap-south-1"
+BUCKET="openaq-rahul-bucket-20250629"
+STACK_NAME="openaq-airquality-stack"
+OUTPUT_PREFIX="output/openaq_latest_data"
+JAR_PATH="target/spark-processor-1.0-SNAPSHOT.jar"
+CLASS_NAME="com.openaq.pipeline.OpenAQLatestFetcher"
+MAPPING_JSON="src/main/resources/location_sensor_selected.json"
+TEMPLATE_PATH="cloudformation/airquality-stack.yaml"
+OUTPUT_DIR="output/openaq_latest_data"
 
-# 1. Build Spark JAR
-printf "\n📦 Building Spark JAR...\n"
+# ------------------------
+# BUILD SPARK JAR LOCALLY
+# ------------------------
+echo "📦 Building Spark JAR..."
 mvn clean package
 
-# 2. Upload files to S3
-printf "\n☁️ Uploading files to S3 bucket: $BUCKET_NAME...\n"
-aws s3 mb s3://$BUCKET_NAME --region $REGION || echo "Bucket already exists"
-aws s3 cp $JAR_PATH s3://$BUCKET_NAME/target/
-aws s3 cp $JSON_PATH s3://$BUCKET_NAME/src/main/resources/
+# ------------------------
+# COPY FILES TO S3 (Jar + Mapping)
+# ------------------------
+echo "☁️ Uploading JAR and mapping JSON to S3..."
+aws s3 mb s3://$BUCKET --region $REGION || echo "Bucket already exists"
+aws s3 cp $JAR_PATH s3://$BUCKET/target/$(basename $JAR_PATH) --region $REGION
+aws s3 cp $MAPPING_JSON s3://$BUCKET/$MAPPING_JSON --region $REGION
 
-# 3. Deploy CloudFormation Stack
-printf "\n🚀 Deploying CloudFormation stack: $STACK_NAME...\n"
-aws cloudformation deploy \
-  --template-file cloudformation/airquality-stack.yaml \
-  --stack-name $STACK_NAME \
-  --parameter-overrides BucketName=$BUCKET_NAME \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region $REGION
+# ------------------------
+# DEPLOY CLOUDFORMATION STACK
+# ------------------------
 
-# 4. Output Useful Info
-printf "\n✅ Deployment Complete.\n"
-aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGION \
-  --query "Stacks[0].Outputs" --output table
+#echo "🚀 Deploying CloudFormation stack: $STACK_NAME..."
+#aws cloudformation deploy \
+#  --template-file $TEMPLATE_PATH \
+#  --stack-name $STACK_NAME \
+#  --capabilities CAPABILITY_NAMED_IAM \
+#  --region $REGION
 
-printf "\n🧪 You can now manually invoke Lambda via AWS Console or AWS CLI:\n"
-printf "aws lambda invoke --function-name TriggerOpenAQJob output.json --region $REGION\n"
+# ------------------------
+# RUN SPARK JOB LOCALLY
+# ------------------------
+echo "🧪 Running Spark job locally..."
+spark-submit \
+  --class $CLASS_NAME \
+  --master "local[*]" \
+  --conf "spark.driver.extraJavaOptions=-DOPENAQ_API_KEY=$OPENAQ_API_KEY" \
+  $JAR_PATH
+
+# ------------------------
+# COPY SPARK OUTPUT TO S3 WITH TIMESTAMP
+# ------------------------
+echo "📂 Uploading local output to S3 (preserving previous files)..."
+TS=$(date +%Y%m%d_%H%M%S)
+
+for f in $OUTPUT_DIR/*; do
+  fname=$(basename "$f")
+  aws s3 cp "$f" "s3://$BUCKET/$OUTPUT_PREFIX/$TS-$fname" --region $REGION
+done
+
+echo "✅ Deployment, local run, and upload complete. You can now connect QuickSight or Athena to s3://$BUCKET/$OUTPUT_PREFIX"

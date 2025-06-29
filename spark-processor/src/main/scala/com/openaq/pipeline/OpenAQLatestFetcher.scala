@@ -56,7 +56,7 @@ object OpenAQLatestFetcher {
     finalDF.coalesce(1)
       .write
       .option("header", "true")
-      .mode("append")
+      .mode("overwrite")
       .csv("output/openaq_latest_data")
       //.csv("s3://openaq-rahul-bucket-20250629/output/openaq_latest_data")
 
